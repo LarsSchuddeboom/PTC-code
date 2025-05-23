@@ -22,6 +22,7 @@
 /* Variables -------------------------------------------------------------------*/
 extern FDCAN_HandleTypeDef hfdcan1;	// CAN module for PT bus
 extern FDCAN_HandleTypeDef hfdcan2; // CAN module for General bus
+extern volatile uint8_t errorStatus;
 
 // Variables for BMS Logs
 extern uint8_t slavesNumber;
@@ -34,7 +35,7 @@ uint8_t IVT_commandReceivedFlag = 0;
 uint8_t IVT_configComplete = 0;
 int32_t IVT_Current;
 int32_t voltageU1_mV;
-int32_t voltageU2_mV;
+int32_t vBatt;  // U2 of IVT-S
 int32_t voltageU3_mV;
 uint16_t isolationResistance_kOhm;
 uint8_t isolationStatus_kOhm;
@@ -156,7 +157,7 @@ void General_FDCAN_Setup(FDCAN_HandleTypeDef *hfdcan)
 
 	// Filter for Powertrain control message
 	sFilterConfig.FilterIndex  = 1;
-	sFilterConfig.FilterID1    = 0x192; // PT Control CAN ID
+	sFilterConfig.FilterID1    = 0x193; // PT Control CAN ID
 	if (HAL_FDCAN_ConfigFilter(hfdcan, &sFilterConfig) != HAL_OK)
 	{
 	  Error_Handler();
@@ -223,13 +224,13 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 		  case IVT_RESULTU1_CANID: // IVT-S Voltage data (U1): Data Byte 0 (DB0) = 0x01
 			  // Voltage U1 data is stored in bytes 2-5
 			  voltageU1_mV = ((RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5]);
-//			  printf("IVT-S Voltage Data (U1): %ld mV\r\n", voltageU1_mV);
+//			  printf("V_DCLink: %ld mV\r\n", voltageU1_mV);
 			  break;
 
 		  case IVT_RESULTU2_CANID: // IVT-S Voltage data (U2): Data Byte 0 (DB0) = 0x02
 			  // Voltage U2 data is stored in bytes 2-5
-			  voltageU2_mV = (RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5];
-//			  printf("IVT-S Voltage Data (U2): %ld mV\r\n", voltageU2_mV);
+			  vBatt = (RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5];
+//			  printf("V_batt: %ld mV\r\n", vBatt);
 			  break;
 
 		  case IVT_RESULTU3_CANID: // IVT-S Voltage data (U3): Data Byte 0 (DB0) = 0x03
@@ -271,19 +272,21 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
 		// Process data based on CAN ID
 		switch (RxHeader.Identifier)
 		{
-		case 0x190: // Main PCB FSM update ID
-			// TODO This CAN ID will be used to control PTC FSM
+		case 0x190: // Main PCB FSM update ID: Used to control PTC state
+			uint8_t PTC_controlCode = RxData2[7];
+			PTC_ControlCodeHandler(PTC_controlCode); // Handle received control code
+			printf("TEST!: %02X\r\n", PTC_controlCode);
 			break;
 
-		case 0x192: // PT control ID: Control code is in byte 0
-			uint8_t PTC_controlCode = RxData2[0];
-			PTC_ControlCodeHandler(PTC_controlCode); // Handle received control code
+		case 0x193: // PT control ID: Control code is in byte 0
+			// TODO Handling for any extra messages Sensecon wants to send
+			printf("CLEARED PRECHARGE FAILURE\r\n");
+			ClearError(ERROR_TIMER_FAILURE);
 			break;
 
 		default: // Unexpected CAN IDs get ignored
 			break;
 		}
-//		printf("\r\n");
 	}
 }
 
@@ -295,7 +298,7 @@ void PTC_ControlCodeHandler(uint8_t controlCode)
 {
 	switch (controlCode)
 	{
-	case 0x01: // Turn HV On. --- HV can only be turned on in IDLE ---
+	case 0x04: // Turn HV On. --- HV can only be turned on in IDLE ---
 		if (currentState == IDLE_State)
 		{
 			currentState = PreCharge_State; // Go to precharge state
@@ -303,14 +306,18 @@ void PTC_ControlCodeHandler(uint8_t controlCode)
 		// else {} --> TBD: can be a message saying it's not possible, or just nothing
 		break;
 
-	case 0x02: // Turn HV Off. --- HV can only be turned off in HV On ---
+	case 0x0B: // Turn HV Off. --- HV can only be turned off in HV On ---
 		if (currentState == HV_ON)
 		{
 			currentState = Discharge_State;
 		}
 		break;
 
-	case 0x03: // TBD
+	case 0x03: // Precharge reset
+		if (errorStatus == ERROR_TIMER_FAILURE)
+		{
+			ClearError(ERROR_TIMER_FAILURE);
+		}
 		break;
 
 	default: // Unexpected control codes are ignored
@@ -368,9 +375,16 @@ void PTC_SendCyclicMessage(void)
 	// TODO handling for if SendMessage fails
 	uint8_t txData_PTCLog[2] = {0};
 	txData_PTCLog[0] = (uint8_t)currentState;
-	if (PTC_FDCAN_SendMessage(&hfdcan2, 0x4B0, FDCAN_DLC_BYTES_2, txData_PTCLog) != HAL_OK)
+//	GPIO_PinState HVALR_state = HAL_GPIO_ReadPin(GPIOB, HVAL_RED);
+//	GPIO_PinState HVALG_state = HAL_GPIO_ReadPin(GPIOB, HVAL_GREEN);
+//	txData_PTCLog[1] = (HVALR_state + HVALG_state);
+	if (PTC_FDCAN_SendMessage(&hfdcan2, 0x4E3, FDCAN_DLC_BYTES_2, txData_PTCLog) != HAL_OK)
 	{
 //		printf("send failed\r\n");
+	}
+	else
+	{
+//		printf("SEND SUCCESS\r\n");
 	}
 
 	/* Get BMS data */
@@ -393,7 +407,7 @@ void PTC_SendCyclicMessage(void)
 	txData_BMSLog1[5] = (uint8_t)(tMax & 0x00FF);
 	txData_BMSLog1[6] = (uint8_t)((tMin & 0xFF00) >> 8);
 	txData_BMSLog1[7] = (uint8_t)(tMin & 0x00FF);
-	PTC_FDCAN_SendMessage(&hfdcan2, 0x4B1, FDCAN_DLC_BYTES_8, txData_BMSLog1);
+	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E4, FDCAN_DLC_BYTES_8, txData_BMSLog1);
 
 	/* BMS Logging message 2: vTot | vTot | I_pack | I_pack | V_DClink | V_DClink */
 	uint8_t txData_BMSLog2[6] = {0};
@@ -403,18 +417,19 @@ void PTC_SendCyclicMessage(void)
 	txData_BMSLog2[3] = (uint8_t)(vTot & 0x00FF);
 	txData_BMSLog2[4] = (uint8_t)((voltageU1_2B & 0xFF00) >> 8); // high byte
 	txData_BMSLog2[5] = (uint8_t)(voltageU1_2B & 0x00FF); // low byte
-	PTC_FDCAN_SendMessage(&hfdcan2, 0x4B2, FDCAN_DLC_BYTES_6, txData_BMSLog2);
+	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E5, FDCAN_DLC_BYTES_6, txData_BMSLog2);
 }
 
 
 void IMD_InfoGeneralHandler(uint8_t *RxData)
 {
 	// Decode IMD info
-	isolationResistance_kOhm = (RxData1[0] << 8) | RxData1[1];
+	isolationResistance_kOhm = RxData1[0] | (RxData1[1] << 8);
 	isolationStatus_kOhm = RxData1[2];
 	IMD_measurementCounter = RxData1[3];
-	IMD_warnings = (RxData1[4] << 8) | RxData1[5];
+	IMD_warnings =  RxData1[4] | (RxData1[5] << 8);
 	IMD_deviceActivity = RxData1[6];
+//	printf("%u\r\n", IMD_warnings);
 
 	// Check if any error is raised by the IMD
 	// TODO implement specific error checks
@@ -422,6 +437,11 @@ void IMD_InfoGeneralHandler(uint8_t *RxData)
 	{
 		RaiseError(ERROR_IMD_TRIGGERED);
 	}
+	else
+	{
+		ClearError(ERROR_IMD_TRIGGERED);
+	}
+
 
 //	printf("ISO175 General Info:\r\n");
 //	printf("	Isolation Resistance: %d kOhm\r\n", isolationResistance_kOhm);
@@ -441,11 +461,6 @@ void IVT_SendCommand(FDCAN_HandleTypeDef *hfdcan, const uint8_t *data)
 	if (PTC_FDCAN_SendMessage(hfdcan, IVT_COMMAND_CANID, FDCAN_DLC_BYTES_8, data) == HAL_OK)
 	{
 		printf("Command sent\r\n");
-		// Wait for message transmission to complete
-		while (HAL_FDCAN_IsTxBufferMessagePending(hfdcan, FDCAN_TX_BUFFER0))
-		{
-			HAL_Delay(1);  // Small delay to prevent CPU overload
-		}
 	}
 
 	else
