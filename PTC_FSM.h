@@ -14,22 +14,26 @@
 #include <stdio.h>
 
 /* In- & output pins definitions for relays */
-// Output pins for setting relays (GPIOG)
-#define HVPLUS_RELAY_PIN	GPIO_PIN_2
-#define HVMINUS_RELAY_PIN	GPIO_PIN_3
-#define PRECHARGE_RELAY_PIN	GPIO_PIN_0
-#define DISCHARGE_RELAY_PIN	GPIO_PIN_1
-#define SDC_RELAY_PIN		GPIO_PIN_6
+// Output pins for setting relays
+#define HVPLUS_RELAY_PIN		GPIO_PIN_3  // GPIOC
+#define HVMINUS_RELAY_PIN		GPIO_PIN_1  // GPIOB
+#define PRECHARGE_RELAY_PIN		GPIO_PIN_2  // GPIOF
+#define DISCHARGE_RELAY_PIN		GPIO_PIN_1  // GPIOF
+#define BMS_LATCH_PIN			GPIO_PIN_0  // GPIOF
 
-// Input pins for reading out relays (GPIOF), Discharge has no readout contact
-#define HVPLUS_RELAY_READOUT	GPIO_PIN_2
-#define HVMINUS_RELAY_READOUT	GPIO_PIN_3
-#define PRECHARGE_RELAY_READOUT	GPIO_PIN_0
-#define SDC_RELAY_READOUT		GPIO_PIN_4
+// Input pins for reading out relays, Discharge has no readout contact
+#define HVPLUS_RELAY_READOUT	GPIO_PIN_2  // GPIOC
+#define HVMINUS_RELAY_READOUT	GPIO_PIN_10 // GPIOF
+#define PRECHARGE_RELAY_READOUT	GPIO_PIN_9  // GPIOE
+#define SDC_RELAY_READOUT		GPIO_PIN_0  // GPIOG
+#define IMD_LATCH_READOUT		GPIO_PIN_3  // GPIOA
+#define BMS_LATCH_READOUT		GPIO_PIN_0  // GPIOC
 
-/* Pins for High Voltage Active Lights */
-#define HVAL_LED_U60CC_PIN  GPIO_PIN_11
-#define HVAL_LED_O60CO_PIN  GPIO_PIN_12
+/* Pins for High Voltage Active Lights & LEDs */
+#define HVAL_RED  				GPIO_PIN_2  // GPIOB
+#define HVAL_GREEN  			GPIO_PIN_3	// GPIOB
+#define LED_R					GPIO_PIN_14 // GPIOD
+#define LED_G					GPIO_PIN_15 // GPIOD
 
 /* Private typedef -----------------------------------------------------------*/
 
