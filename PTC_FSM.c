@@ -5,19 +5,24 @@
  *      Author: larss
  */
 
+// TODO logging: E.131 The BMS must be able to read and display all measured values according
+//                     in a single overview e.g. by connecting a laptop to the BMS at any
+//                     place and any time
+
 #include "PTC_FSM.h"
 #include "main.h"
 #include "PTC_FDCAN.h"
-
-#define PRECHARGE_VOLTAGE_TRIGGER 40000.0
 
 uint32_t relayComparisonCounter = 0;
 volatile uint8_t errorStatus; // Global error status variable
 volatile uint8_t failMessageSent = 0;
 static uint8_t prechargeTimerStarted = 0;  // 0 = Not started, 1 = Started
+int32_t prechargeTrigger;
 
+// External variables
 extern FDCAN_HandleTypeDef hfdcan2;
 extern int32_t voltageU1_mV;
+extern int32_t vBatt;
 extern uint8_t fail_reason;
 
 
@@ -71,13 +76,13 @@ void PTC_UpdateFSM(void)
 void IDLE_State_Handler(void)
 {
 	// '111'
-	Set_LEDs(GPIO_PIN_SET, GPIO_PIN_SET, GPIO_PIN_SET);
+//	Set_LEDs(GPIO_PIN_SET, GPIO_PIN_SET, GPIO_PIN_SET);
 
 	// In IDLE, all relays are reset (i.e. not activated)
 	// The discharge relay is normally closed.
-	HAL_GPIO_WritePin(GPIOG, HVPLUS_RELAY_PIN|HVMINUS_RELAY_PIN|
-					  PRECHARGE_RELAY_PIN|DISCHARGE_RELAY_PIN, GPIO_PIN_RESET);	// Reset all relays
-//	HAL_GPIO_WritePin(GPIOG, SDC_RELAY_PIN, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOC, HVPLUS_RELAY_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, HVMINUS_RELAY_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOF, PRECHARGE_RELAY_PIN|DISCHARGE_RELAY_PIN, GPIO_PIN_RESET);
 
 	GPIO_PinState expectedHVPlus    = GPIO_PIN_RESET;
 	GPIO_PinState expectedHVMinus   = GPIO_PIN_RESET;
@@ -103,12 +108,10 @@ void IDLE_State_Handler(void)
   */
 void PreCharge_State_Handler(void)
 {
-	// '001'
-	Set_LEDs(GPIO_PIN_RESET, GPIO_PIN_RESET, GPIO_PIN_SET);
-
-	// PreCharge: HV+ and SDC are reset (off), while HV-, Precharge and Discharge are set (on).
-	HAL_GPIO_WritePin(GPIOG, HVPLUS_RELAY_PIN|SDC_RELAY_PIN, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(GPIOG, HVMINUS_RELAY_PIN|PRECHARGE_RELAY_PIN|DISCHARGE_RELAY_PIN, GPIO_PIN_SET);
+	// PreCharge: HV+ is reset (off), while HV-, Precharge and Discharge are set (on).
+	HAL_GPIO_WritePin(GPIOC, HVPLUS_RELAY_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, HVMINUS_RELAY_PIN, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOF, PRECHARGE_RELAY_PIN|DISCHARGE_RELAY_PIN, GPIO_PIN_SET);
 
 	GPIO_PinState expectedHVPlus    = GPIO_PIN_RESET;
 	GPIO_PinState expectedSDC       = GPIO_PIN_RESET;
@@ -118,23 +121,25 @@ void PreCharge_State_Handler(void)
 	// Check if readout of relays match the settings
 	PTC_CheckRelayContacts(expectedHVPlus, expectedHVMinus, expectedPrecharge, expectedSDC);
 
+	prechargeTrigger = 0.95 * vBatt;
+	printf("Trigger: %ld mV\r\n", vBatt);
 	if (!prechargeTimerStarted) // Check if Precharge timer is not started already
 	{
 		HAL_TIM_Base_Start_IT(&htim6); // Start timer for Precharge
 		prechargeTimerStarted = 1;     // Set timer started flag
 	}
 
-	if (voltageU1_mV >= PRECHARGE_VOLTAGE_TRIGGER) // Check if HV is at 95% of the total HV
+	if (voltageU1_mV >= prechargeTrigger) // Check if HV is at 95% of the total HV
 	{
 		currentState = HV_ON;
 		return;
 	}
 
-	if (buttonPressedFlag)
-	{
-		 buttonPressedFlag = 0;	// Reset button flag
-		 currentState = HV_ON;
-	}
+//	if (buttonPressedFlag)
+//	{
+//		 buttonPressedFlag = 0;	// Reset button flag
+//		 currentState = HV_ON;
+//	}
 }
 
 /**
@@ -147,14 +152,16 @@ void PreCharge_State_Handler(void)
 void HV_ON_Handler(void)
 {
 	// '010'
-	Set_LEDs(GPIO_PIN_RESET, GPIO_PIN_SET, GPIO_PIN_RESET);
+//	Set_LEDs(GPIO_PIN_RESET, GPIO_PIN_SET, GPIO_PIN_RESET);
 
-	DisableTimer(&htim6); // Stop the Precharge timer
+	DisableTimer(&htim6); 		  // Stop the Precharge timer
 	prechargeTimerStarted = 0;    // Reset Precharge timer started flag
 
-	// HV On: HV+, HV- and Discharge relays are set, Precharge and SDC are reset.
-	HAL_GPIO_WritePin(GPIOG, HVPLUS_RELAY_PIN|HVMINUS_RELAY_PIN|DISCHARGE_RELAY_PIN, GPIO_PIN_SET);
-	HAL_GPIO_WritePin(GPIOG, PRECHARGE_RELAY_PIN|SDC_RELAY_PIN, GPIO_PIN_RESET);
+	// HV On: HV+, HV- and Discharge relays are set, Precharge is reset.
+	HAL_GPIO_WritePin(GPIOC, HVPLUS_RELAY_PIN, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOB, HVMINUS_RELAY_PIN, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOF, DISCHARGE_RELAY_PIN, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOF, PRECHARGE_RELAY_PIN, GPIO_PIN_RESET);
 
 	GPIO_PinState expectedHVPlus    = GPIO_PIN_SET;
 	GPIO_PinState expectedHVMinus   = GPIO_PIN_SET;
@@ -164,12 +171,12 @@ void HV_ON_Handler(void)
 	// Check if readout of relays match the settings
 	PTC_CheckRelayContacts(expectedHVPlus, expectedHVMinus, expectedPrecharge, expectedSDC);
 
-	// TODO Change threshold to ~60V
-	if (voltageU1_mV <= 11000) // HV is below 60V --> assume power is off and go to FAIL
-	{
-		currentState = Fail_State;
-		return;
-	}
+//	// TODO Activate threshold
+//	if (voltageU1_mV <= 50000) // HV is below 50V --> assume power is off and go from FAIL to IDLE
+//	{
+//		currentState = Fail_State;
+//		return;
+//	}
 
 	if (buttonPressedFlag)
 	{
@@ -188,11 +195,12 @@ void HV_ON_Handler(void)
 void Discharge_State_Handler(void)
 {
 	// '011'
-	Set_LEDs(GPIO_PIN_RESET, GPIO_PIN_SET, GPIO_PIN_SET);
+//	Set_LEDs(GPIO_PIN_RESET, GPIO_PIN_SET, GPIO_PIN_SET);
 
 	// Discharge: All relays are reset.
-	HAL_GPIO_WritePin(GPIOG, HVPLUS_RELAY_PIN|HVMINUS_RELAY_PIN, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(GPIOG, PRECHARGE_RELAY_PIN|SDC_RELAY_PIN|DISCHARGE_RELAY_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOC, HVPLUS_RELAY_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, HVMINUS_RELAY_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOF, PRECHARGE_RELAY_PIN|DISCHARGE_RELAY_PIN, GPIO_PIN_RESET);
 
 	GPIO_PinState expectedHVPlus    = GPIO_PIN_RESET;
 	GPIO_PinState expectedHVMinus   = GPIO_PIN_RESET;
@@ -202,7 +210,7 @@ void Discharge_State_Handler(void)
 	// Check if readout of relays match the settings
 	PTC_CheckRelayContacts(expectedHVPlus, expectedHVMinus, expectedPrecharge, expectedSDC);
 
-	if (voltageU1_mV <= 50000) // HV is below discharge threshold
+	if (voltageU1_mV < 60000) // HV is below discharge threshold
 	{
 		currentState = IDLE_State;
 		return;
@@ -228,11 +236,13 @@ void Fail_State_Handler(void)
 	prechargeTimerStarted = 0;    // Reset Precharge timer started flag
 
 	// '100'
-	Set_LEDs(GPIO_PIN_SET, GPIO_PIN_RESET, GPIO_PIN_RESET);
+//	Set_LEDs(GPIO_PIN_SET, GPIO_PIN_RESET, GPIO_PIN_RESET);
 
-	// Fail: SDC is set, all other relays are reset.
-	HAL_GPIO_WritePin(GPIOG, SDC_RELAY_PIN, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(GPIOG, HVPLUS_RELAY_PIN|HVMINUS_RELAY_PIN|PRECHARGE_RELAY_PIN|DISCHARGE_RELAY_PIN, GPIO_PIN_RESET);
+	// Fail: all relays are reset.
+	HAL_GPIO_WritePin(GPIOC, HVPLUS_RELAY_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOB, HVMINUS_RELAY_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOF, PRECHARGE_RELAY_PIN|DISCHARGE_RELAY_PIN, GPIO_PIN_RESET);
+
 	GPIO_PinState expectedSDC       = GPIO_PIN_RESET;
 	GPIO_PinState expectedHVPlus    = GPIO_PIN_RESET;
 	GPIO_PinState expectedHVMinus   = GPIO_PIN_RESET;
@@ -247,7 +257,7 @@ void Fail_State_Handler(void)
 		uint8_t txDataErrorMsg[2] = {0};
 		txDataErrorMsg[0] = errorStatus;
 		txDataErrorMsg[1] = fail_reason;
-		PTC_FDCAN_SendMessage(&hfdcan2, 0x1, FDCAN_DLC_BYTES_2, txDataErrorMsg);
+		PTC_FDCAN_SendMessage(&hfdcan2, 0x33, FDCAN_DLC_BYTES_2, txDataErrorMsg);
 		failMessageSent = 1;  // set fail message flag
 	}
 
@@ -284,10 +294,10 @@ void PTC_CheckRelayContacts(GPIO_PinState expectedHVPlus,
 	if (relayComparisonCounter >= 50000)
 	{
 		// Read actual states from GPIOF (the readout pins)
-		GPIO_PinState actualHVPlus    = HAL_GPIO_ReadPin(GPIOF, HVPLUS_RELAY_READOUT);
+		GPIO_PinState actualHVPlus    = HAL_GPIO_ReadPin(GPIOC, HVPLUS_RELAY_READOUT);
 		GPIO_PinState actualHVMinus   = HAL_GPIO_ReadPin(GPIOF, HVMINUS_RELAY_READOUT);
-		GPIO_PinState actualPrecharge = HAL_GPIO_ReadPin(GPIOF, PRECHARGE_RELAY_READOUT);
-//		GPIO_PinState actualSDC       = HAL_GPIO_ReadPin(GPIOF, SDC_RELAY_READOUT);
+		GPIO_PinState actualPrecharge = HAL_GPIO_ReadPin(GPIOE, PRECHARGE_RELAY_READOUT);
+		GPIO_PinState actualSDC       = HAL_GPIO_ReadPin(GPIOG, SDC_RELAY_READOUT);
 
 		// Check each relay. If there is a mismatch, enter Error Handler.
 		if (actualHVPlus != expectedHVPlus)
@@ -305,11 +315,11 @@ void PTC_CheckRelayContacts(GPIO_PinState expectedHVPlus,
 			printf("Error: Precharge relay contact mismatch!\r\n");
 			RaiseError(ERROR_CONTACT_MISMATCH);
 		}
-//		if (actualSDC != expectedSDC)
-//		{
-//			printf("Error: SDC relay contact mismatch!\r\n");
-//			RaiseError(ERROR_CONTACT_MISMATCH);
-//		}
+		if (actualSDC != expectedSDC)
+		{
+			printf("Error: SDC relay contact mismatch!\r\n");
+			RaiseError(ERROR_CONTACT_MISMATCH);
+		}
 		relayComparisonCounter = 0;
 	}
 }
@@ -330,7 +340,7 @@ void PTC_ErrorCheck(void)
 		ClearError(ERROR_BMS_FAIL); // No BMS failures --> Clear BMS error flag
 	}
 
-	if(HAL_GPIO_ReadPin(GPIOF, SDC_RELAY_READOUT) == GPIO_PIN_RESET) // SDC is triggered
+	if(HAL_GPIO_ReadPin(GPIOG, SDC_RELAY_READOUT) == GPIO_PIN_RESET) // SDC latch
 	{
 		if(currentState != Fail_State)
 		{
@@ -367,13 +377,13 @@ void DisableTimer(TIM_HandleTypeDef *htim)
 	HAL_TIM_Base_Stop_IT(htim);    // Stop the timer interrupt
 }
 
-/* Powertrain Controller State representations on LEDs */
-void Set_LEDs(GPIO_PinState stateLED3, GPIO_PinState stateLED2, GPIO_PinState stateLED1)
-{
-	// Set or Reset LED1
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, stateLED1);
-	// Set or Reset LED2
-	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, stateLED2);
-	// Set or Reset LED3
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, stateLED3);
-}
+///* Powertrain Controller State representations on LEDs */
+//void Set_LEDs(GPIO_PinState stateLED3, GPIO_PinState stateLED2, GPIO_PinState stateLED1)
+//{
+//	// Set or Reset LED1
+//	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, stateLED1);
+//	// Set or Reset LED2
+//	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, stateLED2);
+//	// Set or Reset LED3
+//	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, stateLED3);
+//}
