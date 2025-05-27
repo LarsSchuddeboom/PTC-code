@@ -22,6 +22,7 @@
 /* Variables -------------------------------------------------------------------*/
 extern FDCAN_HandleTypeDef hfdcan1;	// CAN module for PT bus
 extern FDCAN_HandleTypeDef hfdcan2; // CAN module for General bus
+extern uint8_t prechargeTriggerOK;
 extern volatile uint8_t errorStatus;
 
 // Variables for BMS Logs
@@ -34,7 +35,7 @@ extern uint8_t ISenseSlave;
 uint8_t IVT_commandReceivedFlag = 0;
 uint8_t IVT_configComplete = 0;
 int32_t IVT_Current;
-int32_t voltageU1_mV;
+int32_t vDCLink; //U1 of IVT-s
 int32_t vBatt;  // U2 of IVT-S
 int32_t voltageU3_mV;
 uint16_t isolationResistance_kOhm;
@@ -223,13 +224,21 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
 		  case IVT_RESULTU1_CANID: // IVT-S Voltage data (U1): Data Byte 0 (DB0) = 0x01
 			  // Voltage U1 data is stored in bytes 2-5
-			  voltageU1_mV = ((RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5]);
-//			  printf("V_DCLink: %ld mV\r\n", voltageU1_mV);
+			  vDCLink = ((RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5]);
+
+//			  printf("V_DCLink: %ld mV\r\n", vDCLink);
 			  break;
 
 		  case IVT_RESULTU2_CANID: // IVT-S Voltage data (U2): Data Byte 0 (DB0) = 0x02
 			  // Voltage U2 data is stored in bytes 2-5
 			  vBatt = (RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5];
+
+			  // If the state is Precharge,
+			  if ( currentState == PreCharge_State
+				   && (prechargeTriggerOK < 3))
+			  {
+				  prechargeTriggerOK++;
+			  }
 //			  printf("V_batt: %ld mV\r\n", vBatt);
 			  break;
 
@@ -395,9 +404,23 @@ void PTC_SendCyclicMessage(void)
 	uint16_t tMin = 0;
 	uint16_t tMax = 0;
 	int16_t current = 0;
-	int16_t voltageU1_2B = (int16_t)(voltageU1_mV / 2);
+//	int16_t vDCLink_2B = (int16_t)(vDCLink / 2);
 	getLogValues(slavesNumber, slaves, modules, ISenseSlave, &vMax, &vMin, &vTot, &tMin, &tMax, &current);
 
+//	printf("HVB BMS Data:
+//			  	  - slavesNumber = %u
+//			  	  - slaves       = %d
+//			  	  - modules      = %d
+//			  	  - ISenseSlave  = %d
+//			  	  - V_highest    = %u
+//			  	  - V_lowest     = %u
+//			  	  - V_pack       = %u
+//	              - I_pack       = %u
+//	              - V_DCLink     = %ld
+//			  	  - tMin         = %u
+//			      - tMax         = %u",
+//	        slavesNumber, slaves, modules, ISenseSlave, vMax, vMin, vTot, current, vDCLink, tMin, tMax)
+//	printf("\r\n\r\n")
 	/* BMS Logging message 1: vMax | vMax | vMin | vMin | tMax | tMax | tMin | tMin */
 	txData_BMSLog1[0] = (uint8_t)((vMax & 0xFF00) >> 8);
 	txData_BMSLog1[1] = (uint8_t)(vMax & 0x00FF);
@@ -410,13 +433,16 @@ void PTC_SendCyclicMessage(void)
 	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E4, FDCAN_DLC_BYTES_8, txData_BMSLog1);
 
 	/* BMS Logging message 2: vTot | vTot | I_pack | I_pack | V_DClink | V_DClink */
-	uint8_t txData_BMSLog2[6] = {0};
+	uint8_t txData_BMSLog2[7] = {0};
 	txData_BMSLog2[0] = (uint8_t)((vTot & 0xFF00) >> 8);
 	txData_BMSLog2[1] = (uint8_t)(vTot & 0x00FF);
 	txData_BMSLog2[2] = (uint8_t)((current & 0xFF00) >> 8);
 	txData_BMSLog2[3] = (uint8_t)(vTot & 0x00FF);
-	txData_BMSLog2[4] = (uint8_t)((voltageU1_2B & 0xFF00) >> 8); // high byte
-	txData_BMSLog2[5] = (uint8_t)(voltageU1_2B & 0x00FF); // low byte
+	txData_BMSLog2[4] = (uint8_t)((vDCLink & 0xFF000000) >> 24); // highest byte
+	txData_BMSLog2[5] = (uint8_t)((vDCLink & 0x00FF0000) >> 16); // second highest byte
+	txData_BMSLog2[6] = (uint8_t)((vDCLink & 0x0000FF00) >> 8); // second lowest byte
+	txData_BMSLog2[7] = (uint8_t)(vDCLink & 0x000000FF); // lowest byte
+
 	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E5, FDCAN_DLC_BYTES_6, txData_BMSLog2);
 }
 
