@@ -8,6 +8,9 @@
 // TODO logging: E.131 The BMS must be able to read and display all measured values according
 //                     in a single overview e.g. by connecting a laptop to the BMS at any
 //                     place and any time
+//Idea: Detect a laptop is connected via UART and start prints. Maybe at a low frequency e.g. 1 Hz
+//
+
 
 #include "PTC_FSM.h"
 #include "main.h"
@@ -16,12 +19,15 @@
 uint32_t relayComparisonCounter = 0;
 volatile uint8_t errorStatus; // Global error status variable
 volatile uint8_t failMessageSent = 0;
+
+// Precharge variables
 static uint8_t prechargeTimerStarted = 0;  // 0 = Not started, 1 = Started
-int32_t prechargeTrigger;
+static int32_t prechargeTrigger;
+uint8_t prechargeTriggerOK = 0;
 
 // External variables
 extern FDCAN_HandleTypeDef hfdcan2;
-extern int32_t voltageU1_mV;
+extern int32_t vDCLink;
 extern int32_t vBatt;
 extern uint8_t fail_reason;
 
@@ -113,33 +119,42 @@ void PreCharge_State_Handler(void)
 	HAL_GPIO_WritePin(GPIOB, HVMINUS_RELAY_PIN, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(GPIOF, PRECHARGE_RELAY_PIN|DISCHARGE_RELAY_PIN, GPIO_PIN_SET);
 
+	// Check if readout of relays match the settings
 	GPIO_PinState expectedHVPlus    = GPIO_PIN_RESET;
 	GPIO_PinState expectedSDC       = GPIO_PIN_RESET;
 	GPIO_PinState expectedHVMinus   = GPIO_PIN_SET;
 	GPIO_PinState expectedPrecharge = GPIO_PIN_SET;
-
-	// Check if readout of relays match the settings
 	PTC_CheckRelayContacts(expectedHVPlus, expectedHVMinus, expectedPrecharge, expectedSDC);
 
-	prechargeTrigger = 0.95 * vBatt;
-	printf("Trigger: %ld mV\r\n", vBatt);
 	if (!prechargeTimerStarted) // Check if Precharge timer is not started already
 	{
 		HAL_TIM_Base_Start_IT(&htim6); // Start timer for Precharge
 		prechargeTimerStarted = 1;     // Set timer started flag
 	}
 
-	if (voltageU1_mV >= prechargeTrigger) // Check if HV is at 95% of the total HV
+	// Wait until there is a valid DC link voltage measurement
+	if(prechargeTriggerOK == 3)
 	{
-		currentState = HV_ON;
-		return;
+		prechargeTrigger = (95 * vBatt) / 100;
+		printf("Trigger: %ld mV\r\n", prechargeTrigger);
+		printf("V_batt: %ld mV\r\n", vBatt);
+		printf("V_bus: %ld mV\r\n", vDCLink);
+		printf("\r\n");
+
+		if (vDCLink >= prechargeTrigger) // Check if HV is at 95% of the total HV
+		{
+			currentState = HV_ON; // Precharge completed --> go to HV ON state
+			prechargeTriggerOK = 0;
+			return;
+		}
+
+//		if (buttonPressedFlag)
+//		{
+//			 buttonPressedFlag = 0;	// Reset button flag
+//			 currentState = HV_ON;
+//		}
 	}
 
-//	if (buttonPressedFlag)
-//	{
-//		 buttonPressedFlag = 0;	// Reset button flag
-//		 currentState = HV_ON;
-//	}
 }
 
 /**
@@ -172,11 +187,11 @@ void HV_ON_Handler(void)
 	PTC_CheckRelayContacts(expectedHVPlus, expectedHVMinus, expectedPrecharge, expectedSDC);
 
 //	// TODO Activate threshold
-//	if (voltageU1_mV <= 50000) // HV is below 50V --> assume power is off and go from FAIL to IDLE
-//	{
-//		currentState = Fail_State;
-//		return;
-//	}
+	if (vDCLink <= 50000) // HV is below 50V --> assume power is off and go from FAIL to IDLE
+	{
+		currentState = Fail_State;
+		return;
+	}
 
 	if (buttonPressedFlag)
 	{
@@ -210,7 +225,7 @@ void Discharge_State_Handler(void)
 	// Check if readout of relays match the settings
 	PTC_CheckRelayContacts(expectedHVPlus, expectedHVMinus, expectedPrecharge, expectedSDC);
 
-	if (voltageU1_mV < 60000) // HV is below discharge threshold
+	if (vDCLink < 60000) // HV is below discharge threshold
 	{
 		currentState = IDLE_State;
 		return;
@@ -234,6 +249,7 @@ void Fail_State_Handler(void)
 {
 	DisableTimer(&htim6); // Stop the Precharge timer
 	prechargeTimerStarted = 0;    // Reset Precharge timer started flag
+	prechargeTriggerOK = 0;
 
 	// '100'
 //	Set_LEDs(GPIO_PIN_SET, GPIO_PIN_RESET, GPIO_PIN_RESET);
