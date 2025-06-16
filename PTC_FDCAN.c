@@ -22,8 +22,10 @@
 /* Variables -------------------------------------------------------------------*/
 extern FDCAN_HandleTypeDef hfdcan1;	// CAN module for PT bus
 extern FDCAN_HandleTypeDef hfdcan2; // CAN module for General bus
+extern volatile PTC_State currentState;
 extern uint8_t prechargeTriggerOK;
 extern volatile uint8_t errorStatus;
+extern TIM_HandleTypeDef htim14;
 
 // Variables for BMS Logs
 extern uint8_t slavesNumber;
@@ -51,7 +53,8 @@ FDCAN_RxHeaderTypeDef 		RxHeader;
 FDCAN_TxHeaderTypeDef 		TxHeader;
 uint8_t TxData[8] = {0x00, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xFF};
 uint8_t RxData1[8];
-uint8_t RxData2[8];
+uint8_t RxData2[1];
+uint8_t CAN_errorCounter = 0;
 
 
 /* Functions -------------------------------------------------------------------------*/
@@ -226,26 +229,35 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 			  // Voltage U1 data is stored in bytes 2-5
 			  vDCLink = ((RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5]);
 
-//			  printf("V_DCLink: %ld mV\r\n", vDCLink);
+			  printf("V_DCLink: %ld mV\r\n", vDCLink);
 			  break;
 
 		  case IVT_RESULTU2_CANID: // IVT-S Voltage data (U2): Data Byte 0 (DB0) = 0x02
 			  // Voltage U2 data is stored in bytes 2-5
-			  vBatt = (RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5];
-
-			  // If the state is Precharge,
-			  if ( currentState == PreCharge_State
-				   && (prechargeTriggerOK < 3))
-			  {
-				  prechargeTriggerOK++;
-			  }
+//			  vBatt = (RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5];
+//
+//			  // If the state is Precharge,
+//			  if ( currentState == PreCharge_State
+//				   && (prechargeTriggerOK < 5))
+//			  {
+//				  prechargeTriggerOK++;
+//			  }
 //			  printf("V_batt: %ld mV\r\n", vBatt);
 			  break;
 
 		  case IVT_RESULTU3_CANID: // IVT-S Voltage data (U3): Data Byte 0 (DB0) = 0x03
 			  // Voltage U3 data is stored in bytes 2-5
-			  voltageU3_mV = (RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5];
+//			  voltageU3_mV = (RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5];
 //			  printf("IVT-S Voltage Data (U3): %ld mV\r\n", voltageU3_mV);
+			  vBatt = (RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5];
+
+			  // If the state is Precharge,
+			  if ( currentState == PreCharge_State
+				   && (prechargeTriggerOK < 5))
+			  {
+				  prechargeTriggerOK++;
+			  }
+			  printf("V_batt: %ld mV\r\n", vBatt);
 			  break;
 
 		  case IMD_INFO_CANID: // ISO175 General Info
@@ -282,9 +294,9 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
 		switch (RxHeader.Identifier)
 		{
 		case 0x190: // Main PCB FSM update ID: Used to control PTC state
-			uint8_t PTC_controlCode = RxData2[7];
+			uint8_t PTC_controlCode = RxData2[0];
 			PTC_ControlCodeHandler(PTC_controlCode); // Handle received control code
-			printf("TEST!: %02X\r\n", PTC_controlCode);
+			printf("Control code received: %02X\r\n", PTC_controlCode);
 			break;
 
 		case 0x193: // PT control ID: Control code is in byte 0
@@ -316,7 +328,7 @@ void PTC_ControlCodeHandler(uint8_t controlCode)
 		break;
 
 	case 0x0B: // Turn HV Off. --- HV can only be turned off in HV On ---
-		if (currentState == HV_ON)
+		if ((currentState == HV_ON) || (currentState == PreCharge_State))
 		{
 			currentState = Discharge_State;
 		}
@@ -326,6 +338,7 @@ void PTC_ControlCodeHandler(uint8_t controlCode)
 		if (errorStatus == ERROR_TIMER_FAILURE)
 		{
 			ClearError(ERROR_TIMER_FAILURE);
+			ClearError(ERROR_FDCAN_FAILED);
 		}
 		break;
 
@@ -389,10 +402,24 @@ void PTC_SendCyclicMessage(void)
 //	txData_PTCLog[1] = (HVALR_state + HVALG_state);
 	if (PTC_FDCAN_SendMessage(&hfdcan2, 0x4E3, FDCAN_DLC_BYTES_2, txData_PTCLog) != HAL_OK)
 	{
+//		CAN_errorCounter++;
+//		if (CAN_errorCounter > 3)
+//		{
+//			RaiseError(ERROR_FDCAN_FAILED);
+//		}
 //		printf("send failed\r\n");
+//		FDCAN_ProtocolStatusTypeDef protocolStatus;
+//		HAL_FDCAN_GetProtocolStatus(&hfdcan2, &protocolStatus);
+//		if (protocolStatus.BusOff)
+//		{
+//			HAL_TIM_Base_Stop_IT(&htim14); // Stop timer for cyclic CAN sends
+//			RaiseError(ERROR_FDCAN_FAILED);
+//			return;
+//		}
 	}
 	else
 	{
+//		ClearError(ERROR_FDCAN_FAILED);
 //		printf("SEND SUCCESS\r\n");
 	}
 
@@ -575,4 +602,5 @@ void IVT_SetConfiguration(void)
 
 	IVT_SendCommand(&hfdcan1, IVT_START_CMD); // Start command
 	IVT_commandReceivedFlag = 0;
+	printf("IVT-S config success\r\n");
 }
