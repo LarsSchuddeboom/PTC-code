@@ -65,7 +65,7 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 volatile uint8_t buttonPressedFlag = 0;
-volatile PTC_State currentState = IDLE_State;
+extern volatile PTC_State currentState;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -139,9 +139,9 @@ int main(void)
   General_FDCAN_Setup(&hfdcan2);
 
   // Code for setting up IVT-s
-//  IVT_SetConfiguration();
+  IVT_SetConfiguration();
 
-  HAL_TIM_Base_Start_IT(&htim14); // Start timer for Pre Charge
+  HAL_TIM_Base_Start_IT(&htim14); // Start timer for cyclic CAN sends
   /* USER CODE END 2 */
 
   /* Initialize leds */
@@ -755,7 +755,7 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 63999;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 34200;
+  htim6.Init.Period = 11399;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -1045,6 +1045,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		DisableTimer(&htim6);
 	}
 
+	// PTC cyclic CAN logs: 100 ms,
 	if (htim->Instance == TIM14)
 	{
 		PTC_SendCyclicMessage();
