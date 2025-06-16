@@ -60,9 +60,7 @@ typedef enum {
 } ErrorCode_t;
 
 /* Private variables ---------------------------------------------------------*/
-
 extern volatile uint8_t buttonPressedFlag;
-extern volatile PTC_State currentState;
 extern TIM_HandleTypeDef htim6;
 
 /* Function prototypes -------------------------------------------------------*/
