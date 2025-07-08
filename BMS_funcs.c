@@ -3,20 +3,24 @@
 
 void hvRelayOpen() {
     // DOE IETS
-	HAL_GPIO_WritePin(GPIOE, (uint16_t)1<<14, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOF, GPIO_PIN_0, GPIO_PIN_RESET);
 	return;
 }
 
 void hvRelayRelease() {
-	HAL_GPIO_WritePin(GPIOE, (uint16_t)1<<14, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOF, GPIO_PIN_0, GPIO_PIN_SET);
 	return;
 }
 
+void lvRelayOpen() {
+    // DOE IETS
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
+	return;
+}
 
-
-void commFail() {
-    // na max keer nog niet gelukt
-	printf("Comm fail\r\n");
+void lvRelayRelease() {
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_SET);
+	return;
 }
 
 
@@ -33,12 +37,6 @@ uint8_t checkOvpUvp(uint8_t total_ic, cell_asic *ic, BMSmodule *modules){
     uint8_t uv = 0;
 
     for(int i = 0; i < total_ic; i++) {
-    	if(ic[i].aux.pec_match[3] || ic[i].stat.pec_match[1]) {
-    		// PEC error
-			failed_isospi++; // Count
-			return 0; // Return no error, but with the cooldown timer this is no problem.
-    	}
-
     	for(uint8_t j = 0; j < modules[i].cellNumber; j++) {
     		if(j < 4) { // 0-3
     			if(ic[i].stat.flags[0] & (0b1 << (2*j))) {
@@ -79,7 +77,7 @@ uint8_t checkOvpUvp(uint8_t total_ic, cell_asic *ic, BMSmodule *modules){
     }
 
 
-    if(ov & uv) {
+    if(ov && uv) {
 		return 3;
 	} else if (ov) {
 		return 1;
@@ -101,7 +99,7 @@ uint8_t findISenseSlave(uint8_t total_ic, cell_asic *ic) {
 			if(ic[i].aux.a_codes[0] < 31000 && ic[i].aux.a_codes[0] > 29000) {
 				return i;
 			}
-        return -1;
+//        return -1;
     }
     return -1;
 }
@@ -139,13 +137,13 @@ void setNTC(uint8_t ntc, uint8_t total_ic, cell_asic *ic) {
 }
 
 // For C.7
-void getLogValues(uint8_t total_ic, cell_asic *ic, BMSmodule *modules, uint8_t ISenseSlave, uint16_t *vMax, uint16_t *vMin, uint16_t *vTot, uint16_t *tMin, uint16_t *tMax, int16_t *current) {
+void getLogValues(uint8_t total_ic, cell_asic *ic, BMSmodule *modules, uint16_t *vMax, uint16_t *vMin, uint16_t *vTot, uint16_t *tMin, uint16_t *tMax, int16_t *current) {
 	*vMax = 0;
 	*vMin = -1;
 	*vTot = 0;
 	*tMin = 0;
 	*tMax = -1;
-	*current = ic[ISenseSlave].aux.a_codes[0];
+	*current = modules[0].current;
 
 	uint32_t sum = 0;
 
@@ -179,3 +177,9 @@ void getLogValues(uint8_t total_ic, cell_asic *ic, BMSmodule *modules, uint8_t I
 
 	return;
 }
+
+
+
+
+
+
