@@ -31,7 +31,8 @@ extern FDCAN_HandleTypeDef hfdcan2;
 extern TIM_HandleTypeDef htim14;
 extern int32_t vDCLink;
 extern int32_t vBatt;
-extern uint8_t fail_reason;
+extern uint8_t *LV_prot_state;
+extern uint8_t *HV_prot_state;
 
 
 void PTC_UpdateFSM(void)
@@ -100,11 +101,11 @@ void IDLE_State_Handler(void)
 	// Check if readout of relays match the settings
 	PTC_CheckRelayContacts(expectedHVPlus, expectedHVMinus, expectedPrecharge, expectedSDC);
 
-	if (buttonPressedFlag)
-	{
-		buttonPressedFlag = 0;	// Reset button flag
-		currentState = PreCharge_State;
-	}
+//	if (buttonPressedFlag)
+//	{
+//		buttonPressedFlag = 0;	// Reset button flag
+//		currentState = PreCharge_State;
+//	}
 }
 
 /**
@@ -143,12 +144,12 @@ void PreCharge_State_Handler(void)
 		if (vBatt < 60000)
 		{
 			currentState = Fail_State;
-			printf("Precharge failed: vBatt < 60V\r\n");
-			printf("V_batt: %ld mV\r\n", vBatt);
+//			printf("Precharge failed: vBatt < 60V\r\n");
+//			printf("V_batt: %ld mV\r\n", vBatt);
 			return;
 		}
 		prechargeTrigger = (95 * vBatt) / 100;
-//		prechargeTrigger = 65000;
+//		prechargeTrigger = 0;
 //		printf("Trigger: %ld mV\r\n", prechargeTrigger);
 //		printf("V_batt: %ld mV\r\n", vBatt);
 //		printf("V_bus: %ld mV\r\n", vDCLink);
@@ -158,10 +159,16 @@ void PreCharge_State_Handler(void)
 		{
 			currentState = HV_ON; // Precharge completed --> go to HV ON state
 			prechargeTriggerOK = 0;
-			printf("Precharge SUCCESS!\r\n");
+//			printf("Precharge SUCCESS!\r\n");
 			return;
 		}
 	}
+
+//	if (buttonPressedFlag)
+//		{
+//			buttonPressedFlag = 0;	// Reset button flag
+//			currentState = HV_ON;
+//		}
 }
 
 /**
@@ -197,7 +204,7 @@ void HV_ON_Handler(void)
 	if (vDCLink <= 50000)
 	{
 		currentState = Fail_State;
-		printf("DC Link fail: vDCLink < 50V\r\n");
+//		printf("DC Link fail: vDCLink < 50V\r\n");
 		return;
 	}
 
@@ -308,9 +315,10 @@ void Fail_State_Handler(void)
 	// Send fail message to main PCB if it's not sent yet
 	if (!failMessageSent)
 	{
-		uint8_t txDataErrorMsg[2] = {0};
+		uint8_t txDataErrorMsg[3] = {0};
 		txDataErrorMsg[0] = errorStatus;
-		txDataErrorMsg[1] = fail_reason;
+		txDataErrorMsg[1] = *LV_prot_state;
+		txDataErrorMsg[2] = *HV_prot_state;
 		PTC_FDCAN_SendMessage(&hfdcan2, 0x33, FDCAN_DLC_BYTES_2, txDataErrorMsg);
 		failMessageSent = 1;  // set fail message flag
 	}
@@ -320,16 +328,16 @@ void Fail_State_Handler(void)
 	{
 		currentState = IDLE_State;
 		failMessageSent = 0;  // reset fail message flag
-		printf("Error status 0 --> IDLE\r\n");
+//		printf("Error status 0 --> IDLE\r\n");
 		return;
 	}
 
-	if (buttonPressedFlag)
-	{
-		 ClearError(0xFF); // Clear all error flags
-		 buttonPressedFlag = 0;	// Reset button flag
-		 currentState = IDLE_State;
-	}
+//	if (buttonPressedFlag)
+//	{
+//		 ClearError(0xFF); // Clear all error flags
+//		 buttonPressedFlag = 0;	// Reset button flag
+//		 currentState = IDLE_State;
+//	}
 }
 
 /**
@@ -386,7 +394,7 @@ void PTC_ErrorCheck(void)
 		currentState = Fail_State;
 	}
 
-	if (fail_reason) // If BMS has any error --> Raise error
+	if (((*LV_prot_state)&0b11110000) || ((*HV_prot_state)&0b11110000)) // If BMS has any error --> Raise error
 	{
 		RaiseError(ERROR_BMS_FAIL);
 	}
@@ -441,6 +449,6 @@ void Set_LEDs(GPIO_PinState stateLED3, GPIO_PinState stateLED2, GPIO_PinState st
 //	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, stateLED2);
 //	// Set or Reset LED3
 //	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, stateLED3);
-	HAL_GPIO_WritePin(GPIOD, LED_R, stateLED3);
-	HAL_GPIO_WritePin(GPIOD, LED_G, stateLED2);
+//	HAL_GPIO_WritePin(GPIOD, LED_R, stateLED3);
+//	HAL_GPIO_WritePin(GPIOD, LED_G, stateLED2);
 }
