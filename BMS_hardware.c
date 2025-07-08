@@ -1,5 +1,5 @@
 /*
- * BMS_hardware.cpp
+ * bms_hardware.cpp
  *
  *  Created on: Nov 18, 2024
  *      Author: tjges
@@ -48,22 +48,30 @@ Copyright 2017 Linear Technology Corp. (LTC)
 */
 //#include <Arduino.h>
 #include <stdint.h>
-#include "BMS_hardware.h"
+#include "bms_hardware.h"
 #include "stm32h7xx_hal.h"
 //#include "Linduino.h"
 //#include "LT_SPI.h"
 //#include <SPI.h>
 
+extern uint8_t BMS_CS;
+
 void cs_low(uint8_t pin)
 {
-//  output_low(pin);
-  HAL_GPIO_WritePin(GPIOG, (uint16_t)1<<pin, GPIO_PIN_RESET);
+	if(BMS_CS) { // 1 = HV C7
+		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_RESET);
+	} else { // LV A15
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
+	}
 }
 
 void cs_high(uint8_t pin)
 {
-//  output_high(pin);
-  HAL_GPIO_WritePin(GPIOG, 1<<pin, GPIO_PIN_SET);
+	if(BMS_CS) { // 1 = HV C7
+		HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, GPIO_PIN_SET);
+	} else { // LV A15
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
+	}
 }
 
 //void delay_u(uint16_t micro)
