@@ -24,18 +24,19 @@
 
 
 
-void init_state();
-void wait_state();
-void read_start_state();
-void form_pack_state();
+static void init_state();
+static void wait_state();
+static void read_start_state();
+static void form_pack_state();
 
-void fail_state();
-void conv_to_state();
+static void fail_state();
+static void conv_to_state();
 
 
-uint8_t BMS_FSM_update();
-
+uint8_t HV_BMS_FSM_update();
+uint8_t LV_BMS_FSM_update();
 
 
 
 #endif
+
