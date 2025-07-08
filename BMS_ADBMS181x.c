@@ -1,5 +1,5 @@
 /*
- * BMS_ADBMS181x.cpp
+ * ADBMS181x.cpp
  *
  *  Created on: Nov 18, 2024
  *      Author: tjges
@@ -50,7 +50,7 @@
 
 #include <stdint.h>
 #include "BMS_ADBMS181x.h"
-#include "bms_hardware.h"
+#include "BMS_hardware.h"
 //#include <cstdlib.h>
 #include <stdlib.h>
 
@@ -2219,3 +2219,7 @@ void ADBMS181x_set_cfgr_ov(uint8_t nIC, cell_asic *ic,uint16_t ov)
 	ic[nIC].config.tx_data[2] = ic[nIC].config.tx_data[2]&0x0F;
 	ic[nIC].config.tx_data[2] = ic[nIC].config.tx_data[2]|((0x000F & tmp)<<4);
 }
+
+
+
+
