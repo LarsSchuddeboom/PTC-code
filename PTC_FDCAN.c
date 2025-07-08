@@ -14,6 +14,8 @@
  *      Author: Lars Schuddeboom
  */
 
+// TODO fdcan2 polarity naar low zetten --> B8
+
 #include "PTC_FDCAN.h"
 #include "PTC_FSM.h"
 #include "BMS_funcs.h"
@@ -26,12 +28,17 @@ extern volatile PTC_State currentState;
 extern uint8_t prechargeTriggerOK;
 extern volatile uint8_t errorStatus;
 extern TIM_HandleTypeDef htim14;
+extern COMP_HandleTypeDef hcomp1; //HVAL_RED
 
-// Variables for BMS Logs
-extern uint8_t slavesNumber;
-extern cell_asic *slaves;
-extern BMSmodule *modules;
-extern uint8_t ISenseSlave;
+// Variables for LV BMS Logs
+extern uint8_t *LV_slavesNumber;
+extern cell_asic *LV_slaves;
+extern BMSmodule *LV_modules;
+
+// Variables for HV BMS Logs
+extern uint8_t *HV_slavesNumber;
+extern cell_asic *HV_slaves;
+extern BMSmodule *HV_modules;
 
 // Variables for IMD and Isabellenhutte updates
 uint8_t IVT_commandReceivedFlag = 0;
@@ -55,6 +62,9 @@ uint8_t TxData[8] = {0x00, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xFF};
 uint8_t RxData1[8];
 uint8_t RxData2[1];
 uint8_t CAN_errorCounter = 0;
+
+// BMS variables
+uint8_t BMS_resetFlag = 0;
 
 
 /* Functions -------------------------------------------------------------------------*/
@@ -229,7 +239,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 			  // Voltage U1 data is stored in bytes 2-5
 			  vDCLink = ((RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5]);
 
-			  printf("V_DCLink: %ld mV\r\n", vDCLink);
+//			  printf("V_DCLink: %ld mV\r\n", vDCLink);
 			  break;
 
 		  case IVT_RESULTU2_CANID: // IVT-S Voltage data (U2): Data Byte 0 (DB0) = 0x02
@@ -257,10 +267,10 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 			  {
 				  prechargeTriggerOK++;
 			  }
-			  printf("V_batt: %ld mV\r\n", vBatt);
+//			  printf("V_batt: %ld mV\r\n", vBatt);
 			  break;
 
-		  case IMD_INFO_CANID: // ISO175 General Info
+		  case 0x37: // ISO175 General Info
 			  IMD_InfoGeneralHandler(RxData1);
 			  break;
 
@@ -296,13 +306,7 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
 		case 0x190: // Main PCB FSM update ID: Used to control PTC state
 			uint8_t PTC_controlCode = RxData2[0];
 			PTC_ControlCodeHandler(PTC_controlCode); // Handle received control code
-			printf("Control code received: %02X\r\n", PTC_controlCode);
-			break;
-
-		case 0x193: // PT control ID: Control code is in byte 0
-			// TODO Handling for any extra messages Sensecon wants to send
-			printf("CLEARED PRECHARGE FAILURE\r\n");
-			ClearError(ERROR_TIMER_FAILURE);
+//			printf("Control code received: %02X\r\n", PTC_controlCode);
 			break;
 
 		default: // Unexpected CAN IDs get ignored
@@ -335,10 +339,17 @@ void PTC_ControlCodeHandler(uint8_t controlCode)
 		break;
 
 	case 0x03: // Precharge reset
-		if (errorStatus == ERROR_TIMER_FAILURE)
+		if (errorStatus == ERROR_PRECHARGE_FAILURE)
 		{
-			ClearError(ERROR_TIMER_FAILURE);
+			ClearError(ERROR_PRECHARGE_FAILURE);
 			ClearError(ERROR_FDCAN_FAILED);
+		}
+		break;
+
+	case 0xBB:
+		if (errorStatus & ERROR_BMS_FAIL)
+		{
+			BMS_resetFlag = 1;
 		}
 		break;
 
@@ -394,20 +405,33 @@ HAL_StatusTypeDef PTC_FDCAN_SendMessage(FDCAN_HandleTypeDef *hfdcan, uint32_t ca
 void PTC_SendCyclicMessage(void)
 {
 	/* PTC FSM Logging message */
-	// TODO handling for if SendMessage fails
-	uint8_t txData_PTCLog[2] = {0};
-	txData_PTCLog[0] = (uint8_t)currentState;
-//	GPIO_PinState HVALR_state = HAL_GPIO_ReadPin(GPIOB, HVAL_RED);
-//	GPIO_PinState HVALG_state = HAL_GPIO_ReadPin(GPIOB, HVAL_GREEN);
-//	txData_PTCLog[1] = (HVALR_state + HVALG_state);
-	if (PTC_FDCAN_SendMessage(&hfdcan2, 0x4E3, FDCAN_DLC_BYTES_2, txData_PTCLog) != HAL_OK)
+	// TODO state of charge, voltage of all cells connected in series,
+	//      >25% of all cell temps
+	uint8_t txData_PTCLog1[5] = {0};
+	txData_PTCLog1[0] = (uint8_t)currentState;
+
+//	txData_PTCLog1[0] = 1;
+//	txData_PTCLog1[1] = 2;
+//	txData_PTCLog1[2] = (uint8_t)((IMD_warnings & 0xFF00) >> 8);
+//	txData_PTCLog1[3] = (uint8_t)(IMD_warnings & 0x00FF);
+//	txData_PTCLog1[4] = (uint8_t)errorStatus;
+
+	// Check HVALs states
+	if (HAL_GPIO_ReadPin(GPIOB, HVAL_GREEN) == GPIO_PIN_SET)
 	{
-//		CAN_errorCounter++;
-//		if (CAN_errorCounter > 3)
-//		{
-//			RaiseError(ERROR_FDCAN_FAILED);
-//		}
-//		printf("send failed\r\n");
+		txData_PTCLog1[1] = 1;
+	}
+	if (HAL_COMP_GetOutputLevel(&hcomp1) != 0)
+	{
+		txData_PTCLog1[1] = 2;
+	}
+	txData_PTCLog1[2] = (uint8_t)((IMD_warnings & 0xFF00) >> 8);
+	txData_PTCLog1[3] = (uint8_t)(IMD_warnings & 0x00FF);
+	txData_PTCLog1[4] = (uint8_t)errorStatus;
+
+	if (PTC_FDCAN_SendMessage(&hfdcan2, 0x4E3, FDCAN_DLC_BYTES_5, txData_PTCLog1) != HAL_OK)
+	{
+		printf("send failed\r\n");
 //		FDCAN_ProtocolStatusTypeDef protocolStatus;
 //		HAL_FDCAN_GetProtocolStatus(&hfdcan2, &protocolStatus);
 //		if (protocolStatus.BusOff)
@@ -420,57 +444,80 @@ void PTC_SendCyclicMessage(void)
 	else
 	{
 //		ClearError(ERROR_FDCAN_FAILED);
-//		printf("SEND SUCCESS\r\n");
 	}
 
-	/* Get BMS data */
-	uint8_t txData_BMSLog1[8] = {0};
-	uint16_t vMax = 0;
-	uint16_t vMin = 0;
-	uint16_t vTot = 0;
-	uint16_t tMin = 0;
-	uint16_t tMax = 0;
-	int16_t current = 0;
-//	int16_t vDCLink_2B = (int16_t)(vDCLink / 2);
-	getLogValues(slavesNumber, slaves, modules, ISenseSlave, &vMax, &vMin, &vTot, &tMin, &tMax, &current);
 
-//	printf("HVB BMS Data:
-//			  	  - slavesNumber = %u
-//			  	  - slaves       = %d
-//			  	  - modules      = %d
-//			  	  - ISenseSlave  = %d
-//			  	  - V_highest    = %u
-//			  	  - V_lowest     = %u
-//			  	  - V_pack       = %u
-//	              - I_pack       = %u
-//	              - V_DCLink     = %ld
-//			  	  - tMin         = %u
-//			      - tMax         = %u",
-//	        slavesNumber, slaves, modules, ISenseSlave, vMax, vMin, vTot, current, vDCLink, tMin, tMax)
-//	printf("\r\n\r\n")
-	/* BMS Logging message 1: vMax | vMax | vMin | vMin | tMax | tMax | tMin | tMin */
-	txData_BMSLog1[0] = (uint8_t)((vMax & 0xFF00) >> 8);
-	txData_BMSLog1[1] = (uint8_t)(vMax & 0x00FF);
-	txData_BMSLog1[2] = (uint8_t)((vMin & 0xFF00) >> 8);
-	txData_BMSLog1[3] = (uint8_t)(vMin & 0x00FF);
-	txData_BMSLog1[4] = (uint8_t)((tMax & 0xFF00) >> 8);
-	txData_BMSLog1[5] = (uint8_t)(tMax & 0x00FF);
-	txData_BMSLog1[6] = (uint8_t)((tMin & 0xFF00) >> 8);
-	txData_BMSLog1[7] = (uint8_t)(tMin & 0x00FF);
-	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E4, FDCAN_DLC_BYTES_8, txData_BMSLog1);
+	/* PTC Log 2: [Iso res, Iso res, I_bus, I_bus, I_bus, I_bus*/
+	uint8_t txData_PTCLog2[6] = {0};
+	txData_PTCLog2[0] = (uint8_t)((isolationResistance_kOhm & 0xFF00) >> 8);
+	txData_PTCLog2[1] = (uint8_t)(isolationResistance_kOhm & 0x00FF);
+	txData_PTCLog2[2] = (uint8_t)((IVT_Current & 0xFF000000) >> 24); // highest byte
+	txData_PTCLog2[3] = (uint8_t)((IVT_Current & 0x00FF0000) >> 16); // second highest byte
+	txData_PTCLog2[4] = (uint8_t)((IVT_Current & 0x0000FF00) >> 8); // second lowest byte
+	txData_PTCLog2[5] = (uint8_t)(IVT_Current & 0x000000FF); // lowest byte
+	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E4, FDCAN_DLC_BYTES_6, txData_PTCLog2);
 
-	/* BMS Logging message 2: vTot | vTot | I_pack | I_pack | V_DClink | V_DClink */
-	uint8_t txData_BMSLog2[7] = {0};
-	txData_BMSLog2[0] = (uint8_t)((vTot & 0xFF00) >> 8);
-	txData_BMSLog2[1] = (uint8_t)(vTot & 0x00FF);
-	txData_BMSLog2[2] = (uint8_t)((current & 0xFF00) >> 8);
-	txData_BMSLog2[3] = (uint8_t)(vTot & 0x00FF);
-	txData_BMSLog2[4] = (uint8_t)((vDCLink & 0xFF000000) >> 24); // highest byte
-	txData_BMSLog2[5] = (uint8_t)((vDCLink & 0x00FF0000) >> 16); // second highest byte
-	txData_BMSLog2[6] = (uint8_t)((vDCLink & 0x0000FF00) >> 8); // second lowest byte
-	txData_BMSLog2[7] = (uint8_t)(vDCLink & 0x000000FF); // lowest byte
+	/* HV BMS LOGS */
+	uint16_t HV_vMax = 0;
+	uint16_t HV_vMin = 0;
+	uint16_t HV_tMax = 0;
+	uint16_t HV_tMin = 0;
+	uint16_t HV_vTot = 0;
+	int16_t HV_current = 0;
+	getLogValues(*HV_slavesNumber, HV_slaves, HV_modules, &HV_vMax, &HV_vMin, &HV_vTot, &HV_tMin, &HV_tMax, &HV_current);
 
-	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E5, FDCAN_DLC_BYTES_6, txData_BMSLog2);
+	/* HV BMS Logging message 1: vMax | vMax | vMin | vMin | tMax | tMax | tMin | tMin */
+	uint8_t txData_HVBMSLog1[7] = {0};
+	txData_HVBMSLog1[0] = (uint8_t)((HV_vMax & 0xFF00) >> 8);
+	txData_HVBMSLog1[1] = (uint8_t)(HV_vMax & 0x00FF);
+	txData_HVBMSLog1[2] = (uint8_t)((HV_vMin & 0xFF00) >> 8);
+	txData_HVBMSLog1[3] = (uint8_t)(HV_vMin & 0x00FF);
+	txData_HVBMSLog1[4] = (uint8_t)((HV_tMax & 0xFF00) >> 8);
+	txData_HVBMSLog1[5] = (uint8_t)(HV_tMax & 0x00FF);
+	txData_HVBMSLog1[6] = (uint8_t)((HV_tMin & 0xFF00) >> 8);
+	txData_HVBMSLog1[7] = (uint8_t)(HV_tMin & 0x00FF);
+	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E5, FDCAN_DLC_BYTES_8, txData_HVBMSLog1);
+
+	/* HV BMS Logging message 2: vTot | vTot | I_pack | I_pack | V_DClink | V_DClink | V_DCLink | V_DCLink */
+	uint8_t txData_HVBMSLog2[7] = {0};
+	txData_HVBMSLog2[0] = (uint8_t)((HV_vTot & 0xFF00) >> 8);
+	txData_HVBMSLog2[1] = (uint8_t)(HV_vTot & 0x00FF);
+	txData_HVBMSLog2[2] = (uint8_t)((HV_current & 0xFF00) >> 8);
+	txData_HVBMSLog2[3] = (uint8_t)(HV_current & 0x00FF);
+	txData_HVBMSLog2[4] = (uint8_t)((vDCLink & 0xFF000000) >> 24); // highest byte
+	txData_HVBMSLog2[5] = (uint8_t)((vDCLink & 0x00FF0000) >> 16); // second highest byte
+	txData_HVBMSLog2[6] = (uint8_t)((vDCLink & 0x0000FF00) >> 8); // second lowest byte
+	txData_HVBMSLog2[7] = (uint8_t)(vDCLink & 0x000000FF); // lowest byte
+	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E6, FDCAN_DLC_BYTES_8, txData_HVBMSLog2);
+
+	/* LV BMS LOGGING */
+	uint16_t LV_vMax = 0;
+	uint16_t LV_vMin = 0;
+	uint16_t LV_tMax = 0;
+	uint16_t LV_tMin = 0;
+	uint16_t LV_vTot = 0;
+	int16_t LV_current = 0;
+	getLogValues(*LV_slavesNumber, LV_slaves, LV_modules, &LV_vMax, &LV_vMin, &LV_vTot, &LV_tMin, &LV_tMax, &LV_current);
+
+	/* LV BMS Logging message 1: vMax | vMax | vMin | vMin | tMax | tMax | tMin | tMin */
+	uint8_t txData_LVBMSLog1[7] = {0};
+	txData_LVBMSLog1[0] = (uint8_t)((LV_vMax & 0xFF00) >> 8);
+	txData_LVBMSLog1[1] = (uint8_t)(LV_vMax & 0x00FF);
+	txData_LVBMSLog1[2] = (uint8_t)((LV_vMin & 0xFF00) >> 8);
+	txData_LVBMSLog1[3] = (uint8_t)(LV_vMin & 0x00FF);
+	txData_LVBMSLog1[4] = (uint8_t)((LV_tMax & 0xFF00) >> 8);
+	txData_LVBMSLog1[5] = (uint8_t)(LV_tMax & 0x00FF);
+	txData_LVBMSLog1[6] = (uint8_t)((LV_tMin & 0xFF00) >> 8);
+	txData_LVBMSLog1[7] = (uint8_t)(LV_tMin & 0x00FF);
+	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E7, FDCAN_DLC_BYTES_8, txData_LVBMSLog1);
+
+	/* LV BMS Logging message 2: vTot | vTot | I_pack | I_pack */
+	uint8_t txData_LVBMSLog2[4] = {0};
+	txData_LVBMSLog2[0] = (uint8_t)((LV_vTot & 0xFF00) >> 8);
+	txData_LVBMSLog2[1] = (uint8_t)(LV_vTot & 0x00FF);
+	txData_LVBMSLog2[2] = (uint8_t)((LV_current & 0xFF00) >> 8);
+	txData_LVBMSLog2[3] = (uint8_t)(LV_current & 0x00FF);
+	PTC_FDCAN_SendMessage(&hfdcan2, 0x4E8, FDCAN_DLC_BYTES_4, txData_LVBMSLog2);
 }
 
 
