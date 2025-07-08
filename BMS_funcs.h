@@ -10,6 +10,10 @@
 
 void hvRelayOpen();
 void hvRelayRelease();
+
+void lvRelayOpen();
+void lvRelayRelease();
+
 void commFail();
 
 
@@ -30,10 +34,11 @@ typedef struct
 	uint8_t tempNumber;
 	uint8_t chainPos;
 
-	uint16_t CV[18];
-	uint16_t SOC[18];
+//	uint16_t CV[18];
+//	uint16_t SOC[18];
 	uint16_t temperature[16];
 	int32_t current;
+	bool balance[18];
 
 } BMSmodule;
 
@@ -49,9 +54,7 @@ void setNTC(uint8_t ntc, uint8_t total_ic, cell_asic *ic);
 
 uint8_t verifyConfig();
 
-void getLogValues(uint8_t total_ic, cell_asic *ic, BMSmodule *modules, uint8_t ISenseSlave, uint16_t *vMax, uint16_t *vMin, uint16_t *vTot, uint16_t *tMin, uint16_t *tMax, int16_t *current);
-
-extern uint8_t failed_isospi;
+void getLogValues(uint8_t total_ic, cell_asic *ic, BMSmodule *modules, uint16_t *vMax, uint16_t *vMin, uint16_t *vTot, uint16_t *tMin, uint16_t *tMax, int16_t *current);
 
 
 
