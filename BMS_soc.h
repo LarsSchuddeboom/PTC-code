@@ -1,5 +1,5 @@
 /*
- * BMS_soc.h
+ * soc.h
  *
  *  Created on: Jan 3, 2025
  *      Author: nils
@@ -17,11 +17,11 @@
 #define state_soc_dis 2
 #define state_soc_ch 3
 
-void soc_idle_state();
-void soc_dis_state();
-void soc_ch_state();
+static void soc_idle_state(uint8_t slavesNumber, cell_asic *slaves, int8_t ISenseSlave, BMSmodule *modules, int64_t *coulomb_count);
+static void soc_dis_state(uint8_t slavesNumber, cell_asic *slaves, int8_t ISenseSlave, BMSmodule *modules, int64_t *coulomb_count);
+static void soc_ch_state(uint8_t slavesNumber, cell_asic *slaves, int8_t ISenseSlave, BMSmodule *modules, int64_t *coulomb_count);
 
-uint8_t update_soc_fsm();
+static uint8_t update_soc_fsm(uint8_t slavesNumber, cell_asic *slaves, int8_t ISenseSlave, BMSmodule *modules, int64_t *coulomb_count);
 
 
 #endif /* INC_SOC_H_ */
