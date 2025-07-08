@@ -1,5 +1,5 @@
 /*
- * BMS_ADBMS1818.cpp
+ * ADBMS1818.cpp
  *
  *  Created on: Nov 18, 2024
  *      Author: tjges
@@ -787,6 +787,3 @@ void ADBMS1818_set_cfgrb_dcc_b(uint8_t nIC, cell_asic *ic, bool dccbits[])
 		}
 	}
 }
-
-
-
