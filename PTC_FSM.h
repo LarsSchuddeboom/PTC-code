@@ -53,9 +53,9 @@ typedef enum {
 	ERROR_SDC_TRIGGERED     = 0x01,  // Bit 0
 	ERROR_IMD_TRIGGERED     = 0x02,  // Bit 1
 	ERROR_CONTACT_MISMATCH  = 0x04,  // Bit 2
-	ERROR_TIMER_FAILURE     = 0x08,  // Bit 3
+	ERROR_PRECHARGE_FAILURE = 0x08,  // Bit 3
 	ERROR_FDCAN_FAILED      = 0x10,  // Bit 4
-	ERROR_OVERVOLTAGE       = 0x20,   // Bit 5
+	ERROR_OVERVOLTAGE       = 0x20,  // Bit 5
 	ERROR_BMS_FAIL			= 0x40   // Bit 6
 } ErrorCode_t;
 

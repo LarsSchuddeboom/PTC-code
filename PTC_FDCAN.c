@@ -34,11 +34,13 @@ extern COMP_HandleTypeDef hcomp1; //HVAL_RED
 extern uint8_t *LV_slavesNumber;
 extern cell_asic *LV_slaves;
 extern BMSmodule *LV_modules;
+extern uint8_t *LV_fail_reason;
 
 // Variables for HV BMS Logs
 extern uint8_t *HV_slavesNumber;
 extern cell_asic *HV_slaves;
 extern BMSmodule *HV_modules;
+extern uint8_t *HV_fail_reason;
 
 // Variables for IMD and Isabellenhutte updates
 uint8_t IVT_commandReceivedFlag = 0;
@@ -65,6 +67,9 @@ uint8_t CAN_errorCounter = 0;
 
 // BMS variables
 uint8_t BMS_resetFlag = 0;
+
+uint16_t HV_tMax = 0;
+uint16_t HV_tMin = 0;
 
 
 /* Functions -------------------------------------------------------------------------*/
@@ -171,7 +176,7 @@ void General_FDCAN_Setup(FDCAN_HandleTypeDef *hfdcan)
 
 	// Filter for Powertrain control message
 	sFilterConfig.FilterIndex  = 1;
-	sFilterConfig.FilterID1    = 0x193; // PT Control CAN ID
+	sFilterConfig.FilterID1    = 0x1AB; // PT Control CAN ID
 	if (HAL_FDCAN_ConfigFilter(hfdcan, &sFilterConfig) != HAL_OK)
 	{
 	  Error_Handler();
@@ -232,13 +237,18 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 		  case IVT_RESULTI_CANID: // IVT-S Current data: Data Byte 0 (DB0) = 0x00
 			  // Current data is stored in bytes 2-5
 			  IVT_Current = ((RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5]);
-//			  printf("IVT-S Current Data: %ld mA\r\n", IVT_Current);
+//			  printf("Current: %ld mA\r\n", IVT_Current);
 			  break;
 
 		  case IVT_RESULTU1_CANID: // IVT-S Voltage data (U1): Data Byte 0 (DB0) = 0x01
 			  // Voltage U1 data is stored in bytes 2-5
 			  vDCLink = ((RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5]);
-
+			  // If the state is Precharge,
+			  if ( currentState == PreCharge_State
+				   && (prechargeTriggerOK < 5))
+			  {
+				  prechargeTriggerOK++;
+			  }
 //			  printf("V_DCLink: %ld mV\r\n", vDCLink);
 			  break;
 
@@ -261,12 +271,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 //			  printf("IVT-S Voltage Data (U3): %ld mV\r\n", voltageU3_mV);
 			  vBatt = (RxData1[2] << 24) | (RxData1[3] << 16) | (RxData1[4] << 8) | RxData1[5];
 
-			  // If the state is Precharge,
-			  if ( currentState == PreCharge_State
-				   && (prechargeTriggerOK < 5))
-			  {
-				  prechargeTriggerOK++;
-			  }
+
 //			  printf("V_batt: %ld mV\r\n", vBatt);
 			  break;
 
@@ -309,6 +314,18 @@ void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo1ITs)
 //			printf("Control code received: %02X\r\n", PTC_controlCode);
 			break;
 
+		case 0x1AB: // Reset from precharge fail & BMS: overvoltage, undervoltage, overtemp., undertemp.
+			if ((RxData2[0] == 1) && (errorStatus == ERROR_PRECHARGE_FAILURE))
+			{
+				ClearError(ERROR_PRECHARGE_FAILURE);
+				ClearError(ERROR_FDCAN_FAILED);
+			}
+
+			if (errorStatus & ERROR_BMS_FAIL)
+			{
+				BMS_resetFlag = 1;
+			}
+
 		default: // Unexpected CAN IDs get ignored
 			break;
 		}
@@ -346,12 +363,12 @@ void PTC_ControlCodeHandler(uint8_t controlCode)
 		}
 		break;
 
-	case 0xBB:
-		if (errorStatus & ERROR_BMS_FAIL)
-		{
-			BMS_resetFlag = 1;
-		}
-		break;
+//	case 0xBB:
+//		if (errorStatus & ERROR_BMS_FAIL)
+//		{
+//			BMS_resetFlag = 1;
+//		}
+//		break;
 
 	default: // Unexpected control codes are ignored
 		break;
@@ -417,21 +434,23 @@ void PTC_SendCyclicMessage(void)
 //	txData_PTCLog1[4] = (uint8_t)errorStatus;
 
 	// Check HVALs states
-	if (HAL_GPIO_ReadPin(GPIOB, HVAL_GREEN) == GPIO_PIN_SET)
+	if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_3) == GPIO_PIN_RESET)
 	{
-		txData_PTCLog1[1] = 1;
+		txData_PTCLog1[1] += 1;
 	}
 	if (HAL_COMP_GetOutputLevel(&hcomp1) != 0)
 	{
-		txData_PTCLog1[1] = 2;
+		txData_PTCLog1[1] += 2;
 	}
 	txData_PTCLog1[2] = (uint8_t)((IMD_warnings & 0xFF00) >> 8);
 	txData_PTCLog1[3] = (uint8_t)(IMD_warnings & 0x00FF);
 	txData_PTCLog1[4] = (uint8_t)errorStatus;
+	txData_PTCLog1[5] = *LV_fail_reason;
+	txData_PTCLog1[6] = *HV_fail_reason;
 
 	if (PTC_FDCAN_SendMessage(&hfdcan2, 0x4E3, FDCAN_DLC_BYTES_5, txData_PTCLog1) != HAL_OK)
 	{
-		printf("send failed\r\n");
+//		printf("send failed\r\n");
 //		FDCAN_ProtocolStatusTypeDef protocolStatus;
 //		HAL_FDCAN_GetProtocolStatus(&hfdcan2, &protocolStatus);
 //		if (protocolStatus.BusOff)
@@ -447,7 +466,7 @@ void PTC_SendCyclicMessage(void)
 	}
 
 
-	/* PTC Log 2: [Iso res, Iso res, I_bus, I_bus, I_bus, I_bus*/
+	/* PTC Log 2: [Iso res, Iso res, I_bus(mA), I_bus(mA), I_bus(mA), I_bus(mA)*/
 	uint8_t txData_PTCLog2[6] = {0};
 	txData_PTCLog2[0] = (uint8_t)((isolationResistance_kOhm & 0xFF00) >> 8);
 	txData_PTCLog2[1] = (uint8_t)(isolationResistance_kOhm & 0x00FF);
@@ -460,8 +479,6 @@ void PTC_SendCyclicMessage(void)
 	/* HV BMS LOGS */
 	uint16_t HV_vMax = 0;
 	uint16_t HV_vMin = 0;
-	uint16_t HV_tMax = 0;
-	uint16_t HV_tMin = 0;
 	uint16_t HV_vTot = 0;
 	int16_t HV_current = 0;
 	getLogValues(*HV_slavesNumber, HV_slaves, HV_modules, &HV_vMax, &HV_vMin, &HV_vTot, &HV_tMin, &HV_tMax, &HV_current);

@@ -110,10 +110,12 @@ void spi_write_read(uint8_t tx_Data[],//array of data to be written on SPI port
 {
 //	HAL_SPI_TransmitReceive(&hspi1, tx_Data, rx_data, rx_len, STD_Timeout);
 	//Werkte niet
+//	NVIC_DisableIRQ(FDCAN2_IT0_IRQn);
 
 	HAL_SPI_Transmit(&hspi1, tx_Data, tx_len, STD_Timeout);
 	HAL_SPI_Receive(&hspi1, rx_data, rx_len, STD_Timeout);
 
+//	NVIC_EnableIRQ(FDCAN2_IT0_IRQn);
 
 
 //  for (uint8_t i = 0; i < tx_len; i++)

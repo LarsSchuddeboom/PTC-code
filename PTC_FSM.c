@@ -5,13 +5,6 @@
  *      Author: larss
  */
 
-// TODO logging: E.131 The BMS must be able to read and display all measured values according
-//                     in a single overview e.g. by connecting a laptop to the BMS at any
-//                     place and any time
-//Idea: Detect a laptop is connected via UART and start prints. Maybe at a low frequency e.g. 1 Hz
-//
-
-
 #include "PTC_FSM.h"
 #include "main.h"
 #include "PTC_FDCAN.h"
@@ -33,6 +26,8 @@ extern int32_t vDCLink;
 extern int32_t vBatt;
 extern uint8_t *LV_prot_state;
 extern uint8_t *HV_prot_state;
+extern uint8_t *HV_fail_reason;
+extern uint8_t *LV_fail_reason;
 
 
 void PTC_UpdateFSM(void)
@@ -139,23 +134,23 @@ void PreCharge_State_Handler(void)
 	}
 
 	// Wait until there is a valid DC link voltage measurement
-	if(prechargeTriggerOK == 5)
+	if(prechargeTriggerOK >= 5)
 	{
-		if (vBatt < 60000)
+		if (vDCLink < 60000)
 		{
 			currentState = Fail_State;
 //			printf("Precharge failed: vBatt < 60V\r\n");
 //			printf("V_batt: %ld mV\r\n", vBatt);
 			return;
 		}
-		prechargeTrigger = (95 * vBatt) / 100;
+		prechargeTrigger = (95 * vDCLink) / 100;
 //		prechargeTrigger = 0;
 //		printf("Trigger: %ld mV\r\n", prechargeTrigger);
 //		printf("V_batt: %ld mV\r\n", vBatt);
 //		printf("V_bus: %ld mV\r\n", vDCLink);
 //		printf("\r\n");
 
-		if (vDCLink >= prechargeTrigger) // Check if HV is at 95% of the total HV
+		if (vBatt >= prechargeTrigger) // Check if HV is at 95% of the total HV
 		{
 			currentState = HV_ON; // Precharge completed --> go to HV ON state
 			prechargeTriggerOK = 0;
@@ -165,10 +160,10 @@ void PreCharge_State_Handler(void)
 	}
 
 //	if (buttonPressedFlag)
-//		{
-//			buttonPressedFlag = 0;	// Reset button flag
-//			currentState = HV_ON;
-//		}
+//	{
+//		buttonPressedFlag = 0;	// Reset button flag
+//		currentState = HV_ON;
+//	}
 }
 
 /**
@@ -319,6 +314,7 @@ void Fail_State_Handler(void)
 		txDataErrorMsg[0] = errorStatus;
 		txDataErrorMsg[1] = *LV_prot_state;
 		txDataErrorMsg[2] = *HV_prot_state;
+
 		PTC_FDCAN_SendMessage(&hfdcan2, 0x33, FDCAN_DLC_BYTES_2, txDataErrorMsg);
 		failMessageSent = 1;  // set fail message flag
 	}
@@ -394,7 +390,7 @@ void PTC_ErrorCheck(void)
 		currentState = Fail_State;
 	}
 
-	if (((*LV_prot_state)&0b11110000) || ((*HV_prot_state)&0b11110000)) // If BMS has any error --> Raise error
+	if (((*LV_prot_state)&0b11110000) || ((*HV_prot_state)&0b11110000) || *HV_fail_reason || *LV_fail_reason) // If BMS has any error --> Raise error
 	{
 		RaiseError(ERROR_BMS_FAIL);
 	}

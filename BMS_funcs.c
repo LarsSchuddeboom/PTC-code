@@ -14,7 +14,7 @@ void hvRelayRelease() {
 
 void lvRelayOpen() {
     // DOE IETS
-	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_9, GPIO_PIN_RESET);
 	return;
 }
 
@@ -30,8 +30,8 @@ void lvRelayRelease() {
 
 uint8_t checkOvpUvp(uint8_t total_ic, cell_asic *ic, BMSmodule *modules){
 
-    ADBMS1818_rdaux(4, total_ic, ic); // read AuxD
-    ADBMS1818_rdstat(0, total_ic, ic); // read StatB
+//    ADBMS1818_rdaux(4, total_ic, ic); // read AuxD
+//    ADBMS1818_rdstat(0, total_ic, ic); // read StatB
 
     uint8_t ov = 0;
     uint8_t uv = 0;
@@ -48,28 +48,28 @@ uint8_t checkOvpUvp(uint8_t total_ic, cell_asic *ic, BMSmodule *modules){
     		}
 
     		if(j > 3 && j < 8) { // 4-7
-				if(ic[i].stat.flags[1] & (0b1 << (2*j))) {
+				if(ic[i].stat.flags[1] & (0b1 << (2*(j-4)))) {
 					uv++;
 				}
-				if(ic[i].stat.flags[1] & (0b10 << (2*j))) {
+				if(ic[i].stat.flags[1] & (0b10 << (2*(j-4)))) {
 					ov++;
 				}
 			}
 
     		if(j > 7 && j < 12) { // 8-11
-				if(ic[i].stat.flags[2] & (0b1 << (2*j))) {
+				if(ic[i].stat.flags[2] & (0b1 << (2*(j-8)))) {
 					uv++;
 				}
-				if(ic[i].stat.flags[2] & (0b10 << (2*j))) {
+				if(ic[i].stat.flags[2] & (0b10 << (2*(j-8)))) {
 					ov++;
 				}
 			}
 
     		if(j > 11 && j < 18) { // 12-17
-				if(ic[i].aux.a_codes[11] & (0b1 << (2*j))) {
+				if(ic[i].aux.a_codes[11] & (0b1 << (2*(j-12)))) {
 					uv++;
 				}
-				if(ic[i].aux.a_codes[11] & (0b10 << (2*j))) {
+				if(ic[i].aux.a_codes[11] & (0b10 << (2*(j-12)))) {
 					ov++;
 				}
 			}
